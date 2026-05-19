@@ -1849,12 +1849,28 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 #history .moveno { color: var(--muted); margin-right: 2px; }
 
 /* Square highlights */
+.square-55d63 { position: relative; }   /* anchor for ::after move-dot overlays */
 .square-55d63.highlight-from { box-shadow: inset 0 0 0 4px rgba(240,180,0,0.85);
                                background-color: rgba(240,180,0,0.18) !important; }
 .square-55d63.highlight-to   { box-shadow: inset 0 0 0 4px rgba(240,180,0,0.85);
                                background-color: rgba(240,180,0,0.32) !important; }
 .square-55d63.last-from { background-color: rgba(120,180,255,0.22) !important; }
 .square-55d63.last-to   { background-color: rgba(120,180,255,0.38) !important; }
+/* Tap-to-move: selected square + legal-move dots / capture rings (lichess style) */
+.square-55d63.tap-selected { box-shadow: inset 0 0 0 4px rgba(120,180,255,0.85);
+                             background-color: rgba(120,180,255,0.18) !important; }
+.square-55d63.tap-target::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 30%; height: 30%; margin: -15% 0 0 -15%;
+  border-radius: 50%; background: rgba(20,20,20,0.30);
+  pointer-events: none;
+}
+.square-55d63.tap-capture::after {
+  content: ''; position: absolute; left: 5%; top: 5%;
+  width: 90%; height: 90%; border-radius: 50%;
+  border: 4px solid rgba(20,20,20,0.40);
+  background: transparent; pointer-events: none; box-sizing: border-box;
+}
 
 /* Toggle styling */
 #engine-toggle.on { border-color: var(--accent); color: var(--accent); }
@@ -2223,10 +2239,19 @@ function onDragStart(source, piece) {
   // Allow either colour, but only if the piece belongs to the side to move.
   if (piece[0] !== game.turn()) return false;
   clearHintHighlights();
+  clearTapState();   // drag overrides any tap selection
 }
 function onDrop(source, target) {
-  if (source === target) return 'snapback';
+  if (source === target) {
+    // Chessboard.js calls onDrop with source===target when the user touched a piece
+    // without actually dragging it elsewhere. Browsers don't fire a click after this
+    // (mousedown preventDefault suppresses the synthetic click), so this is the only
+    // hook we have for "user tapped a piece". Route into tap-to-select.
+    handleTapOnSquare(source);
+    return 'snapback';
+  }
   clearHintHighlights();
+  clearTapState();
   let move = null;
   try { move = game.move({ from: source, to: target, promotion: 'q' }); }
   catch (e) { move = null; }
@@ -2239,6 +2264,67 @@ function onDrop(source, target) {
   // Returning nothing — chessboard.js handles the visual snap.
 }
 function onSnapEnd() { board.position(game.fen()); }
+
+/* ----------- tap-to-move (primary input on phones) -----------
+   Tap your piece → that square highlights and every legal destination shows
+   a gray dot (or a ring for captures). Tap a destination to play. Tap your
+   piece again to deselect; tap a different own piece to switch selection.
+   Drag still works alongside this — whichever you do first wins. */
+let tappedSq = null;
+function $sqByName(sq) { return window.jQuery('#board .square-' + sq); }
+function clearTapState() {
+  tappedSq = null;
+  $sq().removeClass('tap-selected tap-target tap-capture');
+}
+function paintTapTargets(fromSq) {
+  $sq().removeClass('tap-target tap-capture');
+  const moves = game.moves({ square: fromSq, verbose: true });
+  for (const m of moves) {
+    $sqByName(m.to).addClass(m.flags && m.flags.indexOf('c') !== -1 ? 'tap-capture' : 'tap-target');
+  }
+}
+function selectTapSquare(sq) {
+  clearTapState();
+  const piece = game.get(sq);
+  if (!piece || piece.color !== game.turn()) return;
+  if (game.game_over()) return;
+  tappedSq = sq;
+  $sqByName(sq).addClass('tap-selected');
+  paintTapTargets(sq);
+}
+function attemptTapMove(toSq) {
+  if (!tappedSq) return false;
+  const verbose = game.moves({ square: tappedSq, verbose: true });
+  const legal = verbose.find(m => m.to === toSq);
+  if (!legal) return false;
+  // Run the existing onDrop flow so all engine + history + hint logic stays in one place.
+  // onDrop expects the source/target by name; it calls game.move() and re-renders.
+  const ret = onDrop(tappedSq, toSq);
+  if (ret === 'snapback') return false;
+  // chess.js move happened inside onDrop; sync the board visuals (drag would have done this
+  // automatically; tap-to-move has to do it explicitly).
+  board.position(game.fen());
+  return true;
+}
+function handleTapOnSquare(sq) {
+  if (!sq) return;
+  if (tappedSq) {
+    if (sq === tappedSq) { clearTapState(); return; }
+    const piece = game.get(sq);
+    if (piece && piece.color === game.turn()) { selectTapSquare(sq); return; }
+    if (!attemptTapMove(sq)) clearTapState();
+  } else {
+    selectTapSquare(sq);
+  }
+}
+function setupTapToMove() {
+  // Click delegation handles taps on EMPTY squares (no piece → chessboard.js leaves the
+  // synthetic click alone, so it bubbles to #board normally). Taps on pieces are routed
+  // via onDrop(source===target) — see onDrop above.
+  window.jQuery('#board').on('click', '.square-55d63', function () {
+    handleTapOnSquare(window.jQuery(this).attr('data-square'));
+  });
+}
 
 /* ----------- buttons ----------- */
 function doReset() {
@@ -2322,6 +2408,7 @@ function boot() {
   document.getElementById('hint-toggle').addEventListener('click', toggleHints);
   document.getElementById('copy-fen').addEventListener('click', copyFen);
 
+  setupTapToMove();
   renderHistory();
   renderFen();
   analyseNow();
