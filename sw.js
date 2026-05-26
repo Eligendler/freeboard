@@ -1,7 +1,7 @@
 /* Stockfish Freeboard service worker — cache-first for offline use.
  * Bump CACHE_VERSION to force clients to refresh after you update index.html.
  */
-const CACHE_VERSION = 'freeboard-v3';
+const CACHE_VERSION = 'freeboard-v4';
 const ASSETS = [
   './',
   './index.html',

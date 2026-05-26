@@ -2200,7 +2200,7 @@ async function analyseNow() {
   if (!eng) { setStatus('Engine failed to load'); return; }
   const token = ++analysisToken;
   setStatus('Thinking…');
-  const res = await eng.analyse(game.fen(), { movetime: 800 });
+  const res = await eng.analyse(game.fen(), { movetime: 2000 });
   if (token !== analysisToken) return;
   setStatus('Idle');
   renderEngineResult(res);
